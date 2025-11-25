@@ -41,8 +41,7 @@ func main() {
 	}
 
 	// 4. Llamada al paquete interno
-	fmt.Printf("Iniciando chequeo con %d workers...\n", *concurrencyFlag)
-	checker.Check(urls)
+	checker.Check(urls, *concurrencyFlag)
 }
 
 // readURLs lee el archivo línea por línea y devuelve un slice de strings.
