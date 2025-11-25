@@ -2,9 +2,11 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"flag"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/sudosantos27/go-url-checker/internal/checker"
 )
@@ -13,6 +15,7 @@ func main() {
 	// 1. Definición de flags
 	fileFlag := flag.String("file", "", "Ruta al archivo con la lista de URLs (requerido)")
 	concurrencyFlag := flag.Int("concurrency", 5, "Número de workers concurrentes")
+	timeoutFlag := flag.Duration("timeout", 30*time.Second, "Timeout global para todo el proceso (ej: 30s, 1m)")
 
 	flag.Parse()
 
@@ -40,8 +43,12 @@ func main() {
 		return
 	}
 
-	// 4. Llamada al paquete interno
-	checker.Check(urls, *concurrencyFlag)
+	// 4. Configurar contexto con timeout
+	ctx, cancel := context.WithTimeout(context.Background(), *timeoutFlag)
+	defer cancel()
+
+	// 5. Llamada al paquete interno
+	checker.Check(ctx, urls, *concurrencyFlag)
 }
 
 // readURLs lee el archivo línea por línea y devuelve un slice de strings.
