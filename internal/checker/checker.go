@@ -60,9 +60,15 @@ func Check(ctx context.Context, urls []string, concurrency int) {
 		close(results)
 	}()
 
-	// 4. Recolectar resultados
+	// 4. Recolectar resultados y calcular estadísticas
+	var okCount, failCount int
 	for res := range results {
 		printResult(res)
+		if res.Err != nil || res.StatusCode < 200 || res.StatusCode >= 300 {
+			failCount++
+		} else {
+			okCount++
+		}
 	}
 
 	// Verificar si terminamos por timeout
@@ -70,7 +76,12 @@ func Check(ctx context.Context, urls []string, concurrency int) {
 		fmt.Println("\n!!! Timeout global alcanzado. Proceso cancelado.")
 	}
 
-	fmt.Printf("\nDuración total: %v\n", time.Since(startTotal))
+	totalDuration := time.Since(startTotal)
+	fmt.Println("\n--- Resumen ---")
+	fmt.Printf("Total: %d URLs\n", len(urls))
+	fmt.Printf("OK:    %d\n", okCount)
+	fmt.Printf("FAIL:  %d\n", failCount)
+	fmt.Printf("Duración total: %v\n", totalDuration)
 }
 
 func worker(ctx context.Context, client *http.Client, jobs <-chan string, results chan<- Result, wg *sync.WaitGroup) {
