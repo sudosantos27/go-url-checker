@@ -95,6 +95,14 @@ FAIL:  1
 Total duration: 250ms
 ```
 
+## Testing
+
+To run the unit tests for the project:
+
+```bash
+go test -v ./...
+```
+
 ## Project Structure
 
 - `cmd/url-checker/`: Contains the main entry point (`main.go`).
