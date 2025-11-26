@@ -12,46 +12,46 @@ import (
 )
 
 func main() {
-	// 1. Definición de flags
-	fileFlag := flag.String("file", "", "Ruta al archivo con la lista de URLs (requerido)")
-	concurrencyFlag := flag.Int("concurrency", 5, "Número de workers concurrentes")
-	timeoutFlag := flag.Duration("timeout", 30*time.Second, "Timeout global para todo el proceso (ej: 30s, 1m)")
+	// 1. Flag definition
+	fileFlag := flag.String("file", "", "Path to the file containing URLs (required)")
+	concurrencyFlag := flag.Int("concurrency", 5, "Number of concurrent workers")
+	timeoutFlag := flag.Duration("timeout", 30*time.Second, "Global timeout for the process (e.g., 30s, 1m)")
 
 	flag.Parse()
 
-	// 2. Validación de flags
+	// 2. Flag validation
 	if *fileFlag == "" {
-		fmt.Fprintln(os.Stderr, "Error: El flag -file es obligatorio.")
+		fmt.Fprintln(os.Stderr, "Error: -file flag is required.")
 		flag.Usage()
 		os.Exit(1)
 	}
 
 	if *concurrencyFlag < 1 {
-		fmt.Fprintln(os.Stderr, "Advertencia: -concurrency debe ser al menos 1. Usando 1.")
+		fmt.Fprintln(os.Stderr, "Warning: -concurrency must be at least 1. Using 1.")
 		*concurrencyFlag = 1
 	}
 
-	// 3. Lectura del archivo de URLs
+	// 3. Read URLs from file
 	urls, err := readURLs(*fileFlag)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error al leer el archivo: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Error reading file: %v\n", err)
 		os.Exit(1)
 	}
 
 	if len(urls) == 0 {
-		fmt.Println("El archivo está vacío. No hay nada que procesar.")
+		fmt.Println("The file is empty. Nothing to process.")
 		return
 	}
 
-	// 4. Configurar contexto con timeout
+	// 4. Configure context with timeout
 	ctx, cancel := context.WithTimeout(context.Background(), *timeoutFlag)
 	defer cancel()
 
-	// 5. Llamada al paquete interno
+	// 5. Call internal package
 	checker.Check(ctx, urls, *concurrencyFlag)
 }
 
-// readURLs lee el archivo línea por línea y devuelve un slice de strings.
+// readURLs reads the file line by line and returns a slice of strings.
 func readURLs(path string) ([]string, error) {
 	file, err := os.Open(path)
 	if err != nil {
