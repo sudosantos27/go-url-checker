@@ -14,6 +14,7 @@ var (
 	fileFlag        string
 	concurrencyFlag int
 	timeoutFlag     time.Duration
+	outputFlag      string
 )
 
 // rootCmd represents the base command when called without any subcommands
@@ -52,7 +53,7 @@ for checking the status of multiple URLs.`,
 		defer cancel()
 
 		// Run checker
-		checker.Check(ctx, urls, concurrencyFlag)
+		checker.Check(ctx, urls, concurrencyFlag, outputFlag)
 	},
 }
 
@@ -67,6 +68,7 @@ func init() {
 	rootCmd.Flags().StringVarP(&fileFlag, "file", "f", "", "Path to the file containing URLs (required)")
 	rootCmd.Flags().IntVarP(&concurrencyFlag, "concurrency", "c", 5, "Number of concurrent workers")
 	rootCmd.Flags().DurationVarP(&timeoutFlag, "timeout", "t", 30*time.Second, "Global timeout for the process")
+	rootCmd.Flags().StringVarP(&outputFlag, "output", "o", "text", "Output format (text, json)")
 
 	// Mark file as required? Cobra has MarkFlagRequired but we are doing manual check for now to match previous behavior
 	// rootCmd.MarkFlagRequired("file")

@@ -2,22 +2,25 @@ package checker
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 )
 
 // Result stores the result of checking a URL.
 type Result struct {
-	URL        string
-	StatusCode int
-	Duration   time.Duration
-	Err        error
+	URL        string        `json:"url"`
+	StatusCode int           `json:"status_code"`
+	Duration   time.Duration `json:"duration_ns"` // Duration in nanoseconds for JSON
+	Err        error         `json:"-"`           // Skip error interface, we'll handle it manually if needed or add a string field
+	ErrorMsg   string        `json:"error,omitempty"`
 }
 
 // Check processes URLs using a worker pool and supports cancellation via context.
-func Check(ctx context.Context, urls []string, concurrency int) {
+func Check(ctx context.Context, urls []string, concurrency int, outputFormat string) {
 	// Shared HTTP client.
 	// Note: The client timeout is for each individual request.
 	// The context controls the global timeout.
@@ -61,19 +64,33 @@ func Check(ctx context.Context, urls []string, concurrency int) {
 	}()
 
 	// 4. Collect results and calculate statistics
+	var resultsList []Result
 	var okCount, failCount int
+
 	for res := range results {
-		printResult(res)
+		if outputFormat == "text" {
+			printResult(res)
+		}
+
 		if res.Err != nil || res.StatusCode < 200 || res.StatusCode >= 300 {
 			failCount++
 		} else {
 			okCount++
 		}
+		resultsList = append(resultsList, res)
 	}
 
 	// Check if we finished due to timeout
 	if ctx.Err() == context.DeadlineExceeded {
-		fmt.Println("\n!!! Global timeout reached. Process canceled.")
+		// In JSON mode, we might want to log this to stderr or include it in the output object
+		if outputFormat == "text" {
+			fmt.Println("\n!!! Global timeout reached. Process canceled.")
+		}
+	}
+
+	if outputFormat == "json" {
+		printJSON(resultsList, okCount, failCount, time.Since(startTotal))
+		return
 	}
 
 	totalDuration := time.Since(startTotal)
@@ -109,7 +126,7 @@ func checkURL(ctx context.Context, client *http.Client, url string) Result {
 	// Create a request with the context so it cancels if the context dies
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
-		return Result{URL: url, Duration: time.Since(start), Err: err}
+		return Result{URL: url, Duration: time.Since(start), Err: err, ErrorMsg: err.Error()}
 	}
 
 	resp, err := client.Do(req)
@@ -120,6 +137,7 @@ func checkURL(ctx context.Context, client *http.Client, url string) Result {
 			URL:      url,
 			Duration: duration,
 			Err:      err,
+			ErrorMsg: err.Error(),
 		}
 	}
 	defer resp.Body.Close()
@@ -129,6 +147,37 @@ func checkURL(ctx context.Context, client *http.Client, url string) Result {
 		StatusCode: resp.StatusCode,
 		Duration:   duration,
 		Err:        nil,
+	}
+}
+
+// printJSON formats the output as JSON.
+func printJSON(results []Result, ok, fail int, totalDuration time.Duration) {
+	type Summary struct {
+		Total         int     `json:"total"`
+		OK            int     `json:"ok"`
+		Fail          int     `json:"fail"`
+		TotalDuration float64 `json:"total_duration_s"`
+	}
+
+	type Output struct {
+		Results []Result `json:"results"`
+		Summary Summary  `json:"summary"`
+	}
+
+	out := Output{
+		Results: results,
+		Summary: Summary{
+			Total:         len(results),
+			OK:            ok,
+			Fail:          fail,
+			TotalDuration: totalDuration.Seconds(),
+		},
+	}
+
+	encoder := json.NewEncoder(os.Stdout)
+	encoder.SetIndent("", "  ")
+	if err := encoder.Encode(out); err != nil {
+		fmt.Fprintf(os.Stderr, "Error encoding JSON: %v\n", err)
 	}
 }
 
