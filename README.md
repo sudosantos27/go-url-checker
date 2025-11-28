@@ -35,7 +35,7 @@ You can run the tool directly using `go run` or by executing the built binary.
 Check URLs listed in a file named `urls.txt`:
 
 ```bash
-./url-checker -file urls.txt
+./url-checker --file urls.txt
 ```
 
 ### Run without building
@@ -43,35 +43,35 @@ Check URLs listed in a file named `urls.txt`:
 You can also run the project directly without building the binary:
 
 ```bash
-go run ./cmd/url-checker -file urls.txt
+go run ./cmd/url-checker --file urls.txt
 ```
 
 ### Flags
 
 | Flag | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `-file` | string | (required) | Path to the file containing the list of URLs. |
-| `-concurrency` | int | `5` | Number of concurrent workers to use. |
-| `-timeout` | duration | `30s` | Global timeout for the process (e.g., `10s`, `1m`). |
+| `--file`, `-f` | string | (required) | Path to the file containing the list of URLs. |
+| `--concurrency`, `-c` | int | `5` | Number of concurrent workers to use. |
+| `--timeout`, `-t` | duration | `30s` | Global timeout for the process (e.g., `10s`, `1m`). |
 
 ### Examples
 
 **Run with 10 concurrent workers:**
 
 ```bash
-./url-checker -file urls.txt -concurrency 10
+./url-checker --file urls.txt --concurrency 10
 ```
 
 **Run with a 1-minute global timeout:**
 
 ```bash
-./url-checker -file urls.txt -timeout 1m
+./url-checker --file urls.txt --timeout 1m
 ```
 
 **Combine flags:**
 
 ```bash
-./url-checker -file my-urls.txt -concurrency 20 -timeout 45s
+./url-checker --file my-urls.txt --concurrency 20 --timeout 45s
 ```
 
 ## Input File Format
