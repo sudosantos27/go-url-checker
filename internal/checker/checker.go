@@ -5,10 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"math"
 	"net/http"
 	"os"
 	"sync"
 	"time"
+
+	"golang.org/x/time/rate"
 )
 
 // Result stores the result of checking a URL.
@@ -16,30 +19,43 @@ type Result struct {
 	URL        string        `json:"url"`
 	StatusCode int           `json:"status_code"`
 	Duration   time.Duration `json:"duration_ns"` // Duration in nanoseconds for JSON
-	Err        error         `json:"-"`           // Skip error interface, we'll handle it manually if needed or add a string field
+	Retries    int           `json:"retries"`     // Number of retries performed
+	Err        error         `json:"-"`           // Skip error interface
 	ErrorMsg   string        `json:"error,omitempty"`
 }
 
+// Config holds the configuration for the checker.
+type Config struct {
+	Concurrency int
+	Timeout     time.Duration
+	Retries     int
+	RateLimit   int // Requests per second
+}
+
 // Check processes URLs using a worker pool and supports cancellation via context.
-func Check(ctx context.Context, urls []string, concurrency int, outputFormat string) {
+func Check(ctx context.Context, urls []string, cfg Config, outputFormat string) {
 	// Shared HTTP client.
-	// Note: The client timeout is for each individual request.
-	// The context controls the global timeout.
 	client := &http.Client{
 		Timeout: 10 * time.Second,
+	}
+
+	// Rate Limiter
+	var limiter *rate.Limiter
+	if cfg.RateLimit > 0 {
+		limiter = rate.NewLimiter(rate.Limit(cfg.RateLimit), 1) // Burst of 1
 	}
 
 	jobs := make(chan string, len(urls))
 	results := make(chan Result, len(urls))
 	var wg sync.WaitGroup
 
-	slog.Info("Starting URL checks", "total_urls", len(urls), "workers", concurrency)
+	slog.Info("Starting URL checks", "total_urls", len(urls), "workers", cfg.Concurrency, "retries", cfg.Retries, "rate_limit", cfg.RateLimit)
 	startTotal := time.Now()
 
 	// 1. Start workers
-	for i := 0; i < concurrency; i++ {
+	for i := 0; i < cfg.Concurrency; i++ {
 		wg.Add(1)
-		go worker(ctx, client, jobs, results, &wg)
+		go worker(ctx, client, limiter, jobs, results, &wg, cfg.Retries)
 	}
 
 	// 2. Send jobs
@@ -101,7 +117,7 @@ func Check(ctx context.Context, urls []string, concurrency int, outputFormat str
 }
 
 // worker is the function executed by each goroutine in the pool.
-func worker(ctx context.Context, client *http.Client, jobs <-chan string, results chan<- Result, wg *sync.WaitGroup) {
+func worker(ctx context.Context, client *http.Client, limiter *rate.Limiter, jobs <-chan string, results chan<- Result, wg *sync.WaitGroup, maxRetries int) {
 	defer wg.Done()
 	for {
 		select {
@@ -113,9 +129,45 @@ func worker(ctx context.Context, client *http.Client, jobs <-chan string, result
 				// Channel closed, no more jobs
 				return
 			}
-			results <- checkURL(ctx, client, url)
+
+			// Apply rate limiting if configured
+			if limiter != nil {
+				if err := limiter.Wait(ctx); err != nil {
+					// Context canceled while waiting
+					return
+				}
+			}
+
+			results <- checkURLWithRetries(ctx, client, url, maxRetries)
 		}
 	}
+}
+
+// checkURLWithRetries performs the HTTP request with retries.
+func checkURLWithRetries(ctx context.Context, client *http.Client, url string, maxRetries int) Result {
+	var res Result
+	for i := 0; i <= maxRetries; i++ {
+		if i > 0 {
+			// Exponential backoff: 500ms, 1s, 2s...
+			backoff := time.Duration(math.Pow(2, float64(i-1))) * 500 * time.Millisecond
+			slog.Debug("Retrying request", "url", url, "attempt", i+1, "backoff", backoff)
+			select {
+			case <-ctx.Done():
+				return Result{URL: url, Err: ctx.Err(), ErrorMsg: ctx.Err().Error()}
+			case <-time.After(backoff):
+			}
+		}
+
+		res = checkURL(ctx, client, url)
+		res.Retries = i
+
+		// If success (2xx) or 404 (valid response), return immediately.
+		// We retry on errors or 5xx server errors.
+		if res.Err == nil && res.StatusCode < 500 {
+			return res
+		}
+	}
+	return res
 }
 
 // checkURL performs the HTTP request and returns a Result.

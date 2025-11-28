@@ -39,6 +39,8 @@ for checking the status of multiple URLs.`,
 		concurrency := viper.GetInt("concurrency")
 		timeout := viper.GetDuration("timeout")
 		output := viper.GetString("output")
+		retries := viper.GetInt("retries")
+		rateLimit := viper.GetInt("rate-limit")
 
 		// Validation
 		if file == "" {
@@ -69,7 +71,13 @@ for checking the status of multiple URLs.`,
 		defer cancel()
 
 		// Run checker
-		checker.Check(ctx, urls, concurrency, output)
+		cfg := checker.Config{
+			Concurrency: concurrency,
+			Timeout:     timeout,
+			Retries:     retries,
+			RateLimit:   rateLimit,
+		}
+		checker.Check(ctx, urls, cfg, output)
 	},
 }
 
@@ -90,6 +98,8 @@ func init() {
 	rootCmd.Flags().DurationP("timeout", "t", 30*time.Second, "Global timeout for the process")
 	rootCmd.Flags().StringP("output", "o", "text", "Output format (text, json)")
 	rootCmd.Flags().Bool("debug", false, "Enable debug logging")
+	rootCmd.Flags().Int("retries", 0, "Number of retries for failed requests")
+	rootCmd.Flags().Int("rate-limit", 0, "Rate limit in requests per second (0 = unlimited)")
 
 	// Bind flags to viper
 	viper.BindPFlag("file", rootCmd.Flags().Lookup("file"))
@@ -97,6 +107,8 @@ func init() {
 	viper.BindPFlag("timeout", rootCmd.Flags().Lookup("timeout"))
 	viper.BindPFlag("output", rootCmd.Flags().Lookup("output"))
 	viper.BindPFlag("debug", rootCmd.Flags().Lookup("debug"))
+	viper.BindPFlag("retries", rootCmd.Flags().Lookup("retries"))
+	viper.BindPFlag("rate-limit", rootCmd.Flags().Lookup("rate-limit"))
 }
 
 func initConfig() {
