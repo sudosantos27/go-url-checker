@@ -8,15 +8,12 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 	"github.com/sudosantos27/go-url-checker/internal/checker"
 )
 
 var (
-	fileFlag        string
-	concurrencyFlag int
-	timeoutFlag     time.Duration
-	outputFlag      string
-	debugFlag       bool
+	cfgFile string
 )
 
 // rootCmd represents the base command when called without any subcommands
@@ -30,7 +27,7 @@ for checking the status of multiple URLs.`,
 		opts := &slog.HandlerOptions{
 			Level: slog.LevelInfo,
 		}
-		if debugFlag {
+		if viper.GetBool("debug") {
 			opts.Level = slog.LevelDebug
 		}
 		// Use TextHandler writing to Stderr to avoid polluting stdout (JSON output)
@@ -38,20 +35,25 @@ for checking the status of multiple URLs.`,
 		slog.SetDefault(logger)
 	},
 	Run: func(cmd *cobra.Command, args []string) {
+		file := viper.GetString("file")
+		concurrency := viper.GetInt("concurrency")
+		timeout := viper.GetDuration("timeout")
+		output := viper.GetString("output")
+
 		// Validation
-		if fileFlag == "" {
-			fmt.Fprintln(os.Stderr, "Error: -file flag is required.")
+		if file == "" {
+			fmt.Fprintln(os.Stderr, "Error: file is required (via flag -f, config, or env URL_CHECKER_FILE).")
 			cmd.Usage()
 			os.Exit(1)
 		}
 
-		if concurrencyFlag < 1 {
-			fmt.Fprintln(os.Stderr, "Warning: -concurrency must be at least 1. Using 1.")
-			concurrencyFlag = 1
+		if concurrency < 1 {
+			fmt.Fprintln(os.Stderr, "Warning: concurrency must be at least 1. Using 1.")
+			concurrency = 1
 		}
 
 		// Read URLs
-		urls, err := readURLs(fileFlag)
+		urls, err := readURLs(file)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error reading file: %v\n", err)
 			os.Exit(1)
@@ -63,11 +65,11 @@ for checking the status of multiple URLs.`,
 		}
 
 		// Context with timeout
-		ctx, cancel := context.WithTimeout(context.Background(), timeoutFlag)
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		defer cancel()
 
 		// Run checker
-		checker.Check(ctx, urls, concurrencyFlag, outputFlag)
+		checker.Check(ctx, urls, concurrency, output)
 	},
 }
 
@@ -79,12 +81,47 @@ func Execute() {
 }
 
 func init() {
-	rootCmd.Flags().StringVarP(&fileFlag, "file", "f", "", "Path to the file containing URLs (required)")
-	rootCmd.Flags().IntVarP(&concurrencyFlag, "concurrency", "c", 5, "Number of concurrent workers")
-	rootCmd.Flags().DurationVarP(&timeoutFlag, "timeout", "t", 30*time.Second, "Global timeout for the process")
-	rootCmd.Flags().StringVarP(&outputFlag, "output", "o", "text", "Output format (text, json)")
-	rootCmd.Flags().BoolVar(&debugFlag, "debug", false, "Enable debug logging")
+	cobra.OnInitialize(initConfig)
 
-	// Mark file as required? Cobra has MarkFlagRequired but we are doing manual check for now to match previous behavior
-	// rootCmd.MarkFlagRequired("file")
+	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.go-url-checker.yaml)")
+
+	rootCmd.Flags().StringP("file", "f", "", "Path to the file containing URLs (required)")
+	rootCmd.Flags().IntP("concurrency", "c", 5, "Number of concurrent workers")
+	rootCmd.Flags().DurationP("timeout", "t", 30*time.Second, "Global timeout for the process")
+	rootCmd.Flags().StringP("output", "o", "text", "Output format (text, json)")
+	rootCmd.Flags().Bool("debug", false, "Enable debug logging")
+
+	// Bind flags to viper
+	viper.BindPFlag("file", rootCmd.Flags().Lookup("file"))
+	viper.BindPFlag("concurrency", rootCmd.Flags().Lookup("concurrency"))
+	viper.BindPFlag("timeout", rootCmd.Flags().Lookup("timeout"))
+	viper.BindPFlag("output", rootCmd.Flags().Lookup("output"))
+	viper.BindPFlag("debug", rootCmd.Flags().Lookup("debug"))
+}
+
+func initConfig() {
+	if cfgFile != "" {
+		// Use config file from the flag.
+		viper.SetConfigFile(cfgFile)
+	} else {
+		// Find home directory.
+		home, err := os.UserHomeDir()
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+
+		// Search config in home directory with name ".go-url-checker" (without extension).
+		viper.AddConfigPath(home)
+		viper.AddConfigPath(".")
+		viper.SetConfigType("yaml")
+		viper.SetConfigName(".go-url-checker")
+	}
+
+	viper.SetEnvPrefix("URL_CHECKER")
+	viper.AutomaticEnv() // read in environment variables that match
+
+	if err := viper.ReadInConfig(); err == nil {
+		slog.Debug("Using config file", "file", viper.ConfigFileUsed())
+	}
 }
