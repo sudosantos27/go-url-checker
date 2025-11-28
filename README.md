@@ -23,7 +23,7 @@
 
 2.  Build the binary:
     ```bash
-    go build -o url-checker cmd/url-checker/main.go
+    go build -o url-checker ./cmd/url-checker
     ```
 
 ## Usage
@@ -36,6 +36,14 @@ Check URLs listed in a file named `urls.txt`:
 
 ```bash
 ./url-checker -file urls.txt
+```
+
+### Run without building
+
+You can also run the project directly without building the binary:
+
+```bash
+go run ./cmd/url-checker -file urls.txt
 ```
 
 ### Flags

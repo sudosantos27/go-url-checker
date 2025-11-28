@@ -32,3 +32,6 @@ Thumbs.db
 *.swp
 *.swo
 *~
+
+# Binary
+url-checker
