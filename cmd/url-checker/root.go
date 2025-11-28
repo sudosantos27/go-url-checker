@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"time"
 
@@ -15,6 +16,7 @@ var (
 	concurrencyFlag int
 	timeoutFlag     time.Duration
 	outputFlag      string
+	debugFlag       bool
 )
 
 // rootCmd represents the base command when called without any subcommands
@@ -23,6 +25,18 @@ var rootCmd = &cobra.Command{
 	Short: "A concurrent URL checker CLI",
 	Long: `go-url-checker is a high-performance, concurrent CLI tool 
 for checking the status of multiple URLs.`,
+	PersistentPreRun: func(cmd *cobra.Command, args []string) {
+		// Configure logger
+		opts := &slog.HandlerOptions{
+			Level: slog.LevelInfo,
+		}
+		if debugFlag {
+			opts.Level = slog.LevelDebug
+		}
+		// Use TextHandler writing to Stderr to avoid polluting stdout (JSON output)
+		logger := slog.New(slog.NewTextHandler(os.Stderr, opts))
+		slog.SetDefault(logger)
+	},
 	Run: func(cmd *cobra.Command, args []string) {
 		// Validation
 		if fileFlag == "" {
@@ -69,6 +83,7 @@ func init() {
 	rootCmd.Flags().IntVarP(&concurrencyFlag, "concurrency", "c", 5, "Number of concurrent workers")
 	rootCmd.Flags().DurationVarP(&timeoutFlag, "timeout", "t", 30*time.Second, "Global timeout for the process")
 	rootCmd.Flags().StringVarP(&outputFlag, "output", "o", "text", "Output format (text, json)")
+	rootCmd.Flags().BoolVar(&debugFlag, "debug", false, "Enable debug logging")
 
 	// Mark file as required? Cobra has MarkFlagRequired but we are doing manual check for now to match previous behavior
 	// rootCmd.MarkFlagRequired("file")

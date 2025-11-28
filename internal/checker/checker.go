@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"sync"
@@ -32,7 +33,7 @@ func Check(ctx context.Context, urls []string, concurrency int, outputFormat str
 	results := make(chan Result, len(urls))
 	var wg sync.WaitGroup
 
-	fmt.Printf("Processing %d URLs with %d workers...\n", len(urls), concurrency)
+	slog.Info("Starting URL checks", "total_urls", len(urls), "workers", concurrency)
 	startTotal := time.Now()
 
 	// 1. Start workers
@@ -82,10 +83,7 @@ func Check(ctx context.Context, urls []string, concurrency int, outputFormat str
 
 	// Check if we finished due to timeout
 	if ctx.Err() == context.DeadlineExceeded {
-		// In JSON mode, we might want to log this to stderr or include it in the output object
-		if outputFormat == "text" {
-			fmt.Println("\n!!! Global timeout reached. Process canceled.")
-		}
+		slog.Error("Global timeout reached", "timeout", ctx.Err())
 	}
 
 	if outputFormat == "json" {
@@ -94,11 +92,12 @@ func Check(ctx context.Context, urls []string, concurrency int, outputFormat str
 	}
 
 	totalDuration := time.Since(startTotal)
-	fmt.Println("\n--- Summary ---")
-	fmt.Printf("Total: %d URLs\n", len(urls))
-	fmt.Printf("OK:    %d\n", okCount)
-	fmt.Printf("FAIL:  %d\n", failCount)
-	fmt.Printf("Total duration: %v\n", totalDuration)
+	slog.Info("Check completed",
+		"total", len(urls),
+		"ok", okCount,
+		"fail", failCount,
+		"duration", totalDuration,
+	)
 }
 
 // worker is the function executed by each goroutine in the pool.
@@ -184,8 +183,8 @@ func printJSON(results []Result, ok, fail int, totalDuration time.Duration) {
 // printResult formats and prints the result to the console.
 func printResult(r Result) {
 	if r.Err != nil {
-		fmt.Printf("FAIL %-30s (error: %v) %v\n", r.URL, r.Err, r.Duration)
+		slog.Error("Check failed", "url", r.URL, "error", r.Err, "duration", r.Duration)
 	} else {
-		fmt.Printf("OK   %-30s (%d) %v\n", r.URL, r.StatusCode, r.Duration)
+		slog.Info("Check success", "url", r.URL, "status", r.StatusCode, "duration", r.Duration)
 	}
 }
