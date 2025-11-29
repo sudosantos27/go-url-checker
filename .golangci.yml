@@ -1,0 +1,24 @@
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  enable:
+    - gofmt
+    - govet
+    - staticcheck
+    - revive
+    - gosimple
+    - ineffassign
+    - errcheck
+    - unused
+    - misspell
+    - gocyclo
+
+linters-settings:
+  gocyclo:
+    min-complexity: 15
+  revive:
+    rules:
+      - name: exported
+        severity: warning
