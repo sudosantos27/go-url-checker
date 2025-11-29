@@ -45,7 +45,7 @@ for checking the status of multiple URLs.`,
 		// Validation
 		if file == "" {
 			fmt.Fprintln(os.Stderr, "Error: file is required (via flag -f, config, or env URL_CHECKER_FILE).")
-			cmd.Usage()
+			_ = cmd.Usage()
 			os.Exit(1)
 		}
 
@@ -102,13 +102,13 @@ func init() {
 	rootCmd.Flags().Int("rate-limit", 0, "Rate limit in requests per second (0 = unlimited)")
 
 	// Bind flags to viper
-	viper.BindPFlag("file", rootCmd.Flags().Lookup("file"))
-	viper.BindPFlag("concurrency", rootCmd.Flags().Lookup("concurrency"))
-	viper.BindPFlag("timeout", rootCmd.Flags().Lookup("timeout"))
-	viper.BindPFlag("output", rootCmd.Flags().Lookup("output"))
-	viper.BindPFlag("debug", rootCmd.Flags().Lookup("debug"))
-	viper.BindPFlag("retries", rootCmd.Flags().Lookup("retries"))
-	viper.BindPFlag("rate-limit", rootCmd.Flags().Lookup("rate-limit"))
+	_ = viper.BindPFlag("file", rootCmd.Flags().Lookup("file"))
+	_ = viper.BindPFlag("concurrency", rootCmd.Flags().Lookup("concurrency"))
+	_ = viper.BindPFlag("timeout", rootCmd.Flags().Lookup("timeout"))
+	_ = viper.BindPFlag("output", rootCmd.Flags().Lookup("output"))
+	_ = viper.BindPFlag("debug", rootCmd.Flags().Lookup("debug"))
+	_ = viper.BindPFlag("retries", rootCmd.Flags().Lookup("retries"))
+	_ = viper.BindPFlag("rate-limit", rootCmd.Flags().Lookup("rate-limit"))
 }
 
 func initConfig() {
