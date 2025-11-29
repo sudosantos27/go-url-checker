@@ -2,3 +2,4 @@ https://google.com
 https://github.com
 https://golang.org
 https://example.com
+https://non-existent-url.test

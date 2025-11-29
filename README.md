@@ -71,7 +71,7 @@ go run ./cmd/url-checker --file urls.txt
 **Combine flags:**
 
 ```bash
-./url-checker --file my-urls.txt --concurrency 20 --timeout 45s
+./url-checker --file urls.txt --concurrency 20 --timeout 45s
 ```
 
 ## Input File Format
