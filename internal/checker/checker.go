@@ -14,7 +14,9 @@ import (
 	"golang.org/x/time/rate"
 )
 
-// Result stores the result of checking a URL.
+// Result represents the outcome of a single URL check operation.
+// It includes metadata such as the status code, duration, and any error encountered.
+// This struct is tagged for JSON serialization to support structured output.
 type Result struct {
 	URL        string        `json:"url"`
 	StatusCode int           `json:"status_code"`
@@ -24,27 +26,40 @@ type Result struct {
 	ErrorMsg   string        `json:"error,omitempty"`
 }
 
-// Config holds the configuration for the checker.
+// Config holds the configuration parameters for the URL checker.
+// It controls concurrency levels, timeouts, retry policies, and rate limiting.
 type Config struct {
-	Concurrency int
-	Timeout     time.Duration
-	Retries     int
-	RateLimit   int // Requests per second
+	Concurrency int           // Number of concurrent workers
+	Timeout     time.Duration // Global timeout context (not used directly in struct, but good for context)
+	Retries     int           // Maximum number of retries for failed requests
+	RateLimit   int           // Rate limit in requests per second (0 = unlimited)
 }
 
-// Check processes URLs using a worker pool and supports cancellation via context.
+// Check is the main entry point for the URL checking logic.
+// It initializes the worker pool, manages the channels for jobs and results,
+// and handles the aggregation of statistics.
+//
+// Parameters:
+//   - ctx: Context for global cancellation and timeout.
+//   - urls: Slice of URL strings to check.
+//   - cfg: Configuration object containing concurrency, retry, and rate limit settings.
+//   - outputFormat: Format for the final output ("text" or "json").
 func Check(ctx context.Context, urls []string, cfg Config, outputFormat string) {
-	// Shared HTTP client.
+	// Initialize a shared HTTP client.
+	// We use a default timeout of 10 seconds per individual request.
+	// Note: The global timeout is managed by the passed 'ctx'.
 	client := &http.Client{
 		Timeout: 10 * time.Second,
 	}
 
-	// Rate Limiter
+	// Initialize the Rate Limiter if a limit is configured.
+	// We use a burst size of 1 to strictly enforce the rate.
 	var limiter *rate.Limiter
 	if cfg.RateLimit > 0 {
-		limiter = rate.NewLimiter(rate.Limit(cfg.RateLimit), 1) // Burst of 1
+		limiter = rate.NewLimiter(rate.Limit(cfg.RateLimit), 1)
 	}
 
+	// Create buffered channels for jobs and results to prevent blocking.
 	jobs := make(chan string, len(urls))
 	results := make(chan Result, len(urls))
 	var wg sync.WaitGroup
@@ -52,20 +67,21 @@ func Check(ctx context.Context, urls []string, cfg Config, outputFormat string) 
 	slog.Info("Starting URL checks", "total_urls", len(urls), "workers", cfg.Concurrency, "retries", cfg.Retries, "rate_limit", cfg.RateLimit)
 	startTotal := time.Now()
 
-	// 1. Start workers
+	// 1. Start the worker pool.
+	// We spawn 'cfg.Concurrency' goroutines to process URLs in parallel.
 	for i := 0; i < cfg.Concurrency; i++ {
 		wg.Add(1)
 		go worker(ctx, client, limiter, jobs, results, &wg, cfg.Retries)
 	}
 
-	// 2. Send jobs
-	// Use a goroutine to send jobs to avoid blocking if the buffer fills up
-	// (although here the buffer is len(urls), it's good practice).
+	// 2. Dispatch jobs to the workers.
+	// We run this in a separate goroutine to ensure that job submission doesn't block
+	// the main execution flow, although with a fully buffered channel this is less of a concern.
 	go func() {
 		for _, u := range urls {
 			select {
 			case <-ctx.Done():
-				// If context is canceled, stop sending jobs
+				// If context is canceled (e.g. timeout), stop sending jobs immediately.
 				close(jobs)
 				return
 			case jobs <- u:
@@ -74,21 +90,27 @@ func Check(ctx context.Context, urls []string, cfg Config, outputFormat string) 
 		close(jobs)
 	}()
 
-	// 3. Wait for workers and close results
+	// 3. Monitor workers and close the results channel.
+	// This goroutine waits for all workers to finish their tasks before closing the results channel,
+	// signaling to the consumer that no more results will arrive.
 	go func() {
 		wg.Wait()
 		close(results)
 	}()
 
-	// 4. Collect results and calculate statistics
+	// 4. Collect results and calculate statistics.
+	// We iterate over the results channel as results come in.
 	var resultsList []Result
 	var okCount, failCount int
 
 	for res := range results {
+		// In text mode, we print results as they arrive for real-time feedback.
 		if outputFormat == "text" {
 			printResult(res)
 		}
 
+		// Determine success vs failure.
+		// We consider a check successful if there is no error and the status code is 2xx.
 		if res.Err != nil || res.StatusCode < 200 || res.StatusCode >= 300 {
 			failCount++
 		} else {
@@ -97,16 +119,18 @@ func Check(ctx context.Context, urls []string, cfg Config, outputFormat string) 
 		resultsList = append(resultsList, res)
 	}
 
-	// Check if we finished due to timeout
+	// Check if the operation was terminated due to the global timeout.
 	if ctx.Err() == context.DeadlineExceeded {
 		slog.Error("Global timeout reached", "timeout", ctx.Err())
 	}
 
+	// If JSON output is requested, print the full report in JSON format and exit.
 	if outputFormat == "json" {
 		printJSON(resultsList, okCount, failCount, time.Since(startTotal))
 		return
 	}
 
+	// Print a summary of the execution statistics (Text mode).
 	totalDuration := time.Since(startTotal)
 	slog.Info("Check completed",
 		"total", len(urls),
@@ -116,24 +140,35 @@ func Check(ctx context.Context, urls []string, cfg Config, outputFormat string) 
 	)
 }
 
-// worker is the function executed by each goroutine in the pool.
+// worker is the core logic for each goroutine in the worker pool.
+// It continuously pulls URLs from the jobs channel and processes them.
+//
+// Parameters:
+//   - ctx: Context for cancellation.
+//   - client: Shared HTTP client.
+//   - limiter: Rate limiter (can be nil).
+//   - jobs: Channel to receive URLs from.
+//   - results: Channel to send results to.
+//   - wg: WaitGroup to signal completion.
+//   - maxRetries: Maximum number of retries allowed for failed requests.
 func worker(ctx context.Context, client *http.Client, limiter *rate.Limiter, jobs <-chan string, results chan<- Result, wg *sync.WaitGroup, maxRetries int) {
 	defer wg.Done()
 	for {
 		select {
 		case <-ctx.Done():
-			// Context canceled, exit worker
+			// Context canceled, exit worker immediately.
 			return
 		case url, ok := <-jobs:
 			if !ok {
-				// Channel closed, no more jobs
+				// Channel closed, no more jobs to process.
 				return
 			}
 
-			// Apply rate limiting if configured
+			// Apply rate limiting if configured.
+			// Wait() blocks until the limiter allows the event to happen.
 			if limiter != nil {
 				if err := limiter.Wait(ctx); err != nil {
-					// Context canceled while waiting
+					// Context canceled while waiting.
 					return
 				}
 			}
@@ -143,14 +178,17 @@ func worker(ctx context.Context, client *http.Client, limiter *rate.Limiter, job
 	}
 }
 
-// checkURLWithRetries performs the HTTP request with retries.
+// checkURLWithRetries performs the HTTP request with retry logic using exponential backoff.
+// It attempts to fetch the URL up to 'maxRetries' + 1 times.
 func checkURLWithRetries(ctx context.Context, client *http.Client, url string, maxRetries int) Result {
 	var res Result
 	for i := 0; i <= maxRetries; i++ {
 		if i > 0 {
-			// Exponential backoff: 500ms, 1s, 2s...
+			// Calculate exponential backoff delay: 500ms, 1s, 2s...
 			backoff := time.Duration(math.Pow(2, float64(i-1))) * 500 * time.Millisecond
 			slog.Debug("Retrying request", "url", url, "attempt", i+1, "backoff", backoff)
+
+			// Wait for the backoff duration or context cancellation.
 			select {
 			case <-ctx.Done():
 				return Result{URL: url, Err: ctx.Err(), ErrorMsg: ctx.Err().Error()}
@@ -161,8 +199,9 @@ func checkURLWithRetries(ctx context.Context, client *http.Client, url string, m
 		res = checkURL(ctx, client, url)
 		res.Retries = i
 
-		// If success (2xx) or 404 (valid response), return immediately.
-		// We retry on errors or 5xx server errors.
+		// If the request was successful (2xx) or returned a 404 (which is a valid HTTP response),
+		// we consider it "done" and do not retry.
+		// We only retry on network errors or 5xx server errors.
 		if res.Err == nil && res.StatusCode < 500 {
 			return res
 		}
@@ -170,11 +209,13 @@ func checkURLWithRetries(ctx context.Context, client *http.Client, url string, m
 	return res
 }
 
-// checkURL performs the HTTP request and returns a Result.
+// checkURL performs a single HTTP GET request.
+// It wraps the request in the provided context to support cancellation.
 func checkURL(ctx context.Context, client *http.Client, url string) Result {
 	start := time.Now()
 
-	// Create a request with the context so it cancels if the context dies
+	// Create a new request with the provided context.
+	// This ensures that if the global context is canceled, the in-flight request is aborted.
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return Result{URL: url, Duration: time.Since(start), Err: err, ErrorMsg: err.Error()}
@@ -201,7 +242,8 @@ func checkURL(ctx context.Context, client *http.Client, url string) Result {
 	}
 }
 
-// printJSON formats the output as JSON.
+// printJSON formats and prints the entire result set as a JSON object.
+// This is used when the --output=json flag is set.
 func printJSON(results []Result, ok, fail int, totalDuration time.Duration) {
 	type Summary struct {
 		Total         int     `json:"total"`
@@ -232,7 +274,7 @@ func printJSON(results []Result, ok, fail int, totalDuration time.Duration) {
 	}
 }
 
-// printResult formats and prints the result to the console.
+// printResult logs the result of a single URL check to the console using structured logging.
 func printResult(r Result) {
 	if r.Err != nil {
 		slog.Error("Check failed", "url", r.URL, "error", r.Err, "duration", r.Duration)

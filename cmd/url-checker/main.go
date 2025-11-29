@@ -5,13 +5,14 @@ import (
 	"os"
 )
 
+// main is the entry point of the application.
+// It delegates the execution to the root command defined in the cmd/url-checker package.
 func main() {
 	Execute()
 }
 
-// readURLs reads the file line by line and returns a slice of strings.
-// Kept here or moved to a utility package? For now keeping it in main package but outside main func.
-// Since root.go is in package main, it can access this.
+// readURLs reads a file from the given path and returns a slice of strings containing the URLs.
+// It expects one URL per line. Empty lines are ignored.
 func readURLs(path string) ([]string, error) {
 	file, err := os.Open(path)
 	if err != nil {
